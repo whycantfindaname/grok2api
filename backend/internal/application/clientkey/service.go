@@ -412,33 +412,11 @@ func (s *Service) BatchDelete(ctx context.Context, ids []uint64) (int64, error) 
 
 // Authenticate 校验 API Key、RPM 和并发限制，并返回请求结束时必须调用的 release。
 func (s *Service) Authenticate(ctx context.Context, raw string) (clientkeydomain.Key, func(), error) {
-	prefix, ok := security.SplitClientKey(raw)
-	if !ok {
-		return clientkeydomain.Key{}, nil, ErrInvalidKey
+	value, err := s.AuthenticateIdentity(ctx, raw)
+	if err != nil {
+		return clientkeydomain.Key{}, nil, err
 	}
 	now := time.Now().UTC()
-	value, cached := s.authCache.get(prefix, now)
-	if !cached {
-		var err error
-		value, err = s.keys.GetByPrefix(ctx, prefix)
-		if err != nil {
-			if !errors.Is(err, repository.ErrNotFound) {
-				return clientkeydomain.Key{}, nil, fmt.Errorf("%w: 客户端 Key 仓储: %v", ErrRuntimeUnavailable, err)
-			}
-			return clientkeydomain.Key{}, nil, ErrInvalidKey
-		}
-		s.authCache.put(prefix, value, now)
-	}
-	if value.InternalKind != "" {
-		return clientkeydomain.Key{}, nil, ErrInvalidKey
-	}
-	if !value.IsAvailable(now) {
-		return clientkeydomain.Key{}, nil, ErrInvalidKey
-	}
-	want := security.HashToken(raw)
-	if subtle.ConstantTimeCompare([]byte(want), []byte(value.SecretHash)) != 1 {
-		return clientkeydomain.Key{}, nil, ErrInvalidKey
-	}
 	if value.BillingLimitUSDTicks > 0 {
 		remaining := value.BillingLimitUSDTicks - value.BilledUsageUSDTicks
 		if remaining <= 0 || value.ReservedUsageUSDTicks >= remaining {
@@ -470,6 +448,38 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (clientkeydomain
 		_ = s.keys.Touch(ctx, value.ID)
 	}
 	return value, release, nil
+}
+
+// AuthenticateIdentity validates a client key without consuming inference rate or concurrency quotas.
+func (s *Service) AuthenticateIdentity(ctx context.Context, raw string) (clientkeydomain.Key, error) {
+	prefix, ok := security.SplitClientKey(raw)
+	if !ok {
+		return clientkeydomain.Key{}, ErrInvalidKey
+	}
+	now := time.Now().UTC()
+	value, cached := s.authCache.get(prefix, now)
+	if !cached {
+		var err error
+		value, err = s.keys.GetByPrefix(ctx, prefix)
+		if err != nil {
+			if !errors.Is(err, repository.ErrNotFound) {
+				return clientkeydomain.Key{}, fmt.Errorf("%w: 客户端 Key 仓储: %v", ErrRuntimeUnavailable, err)
+			}
+			return clientkeydomain.Key{}, ErrInvalidKey
+		}
+		s.authCache.put(prefix, value, now)
+	}
+	if value.InternalKind != "" {
+		return clientkeydomain.Key{}, ErrInvalidKey
+	}
+	if !value.IsAvailable(now) {
+		return clientkeydomain.Key{}, ErrInvalidKey
+	}
+	want := security.HashToken(raw)
+	if subtle.ConstantTimeCompare([]byte(want), []byte(value.SecretHash)) != 1 {
+		return clientkeydomain.Key{}, ErrInvalidKey
+	}
+	return value, nil
 }
 
 func (s *Service) rejectInternalKeys(ctx context.Context, ids []uint64) error {

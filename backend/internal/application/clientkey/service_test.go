@@ -97,6 +97,9 @@ func TestQualityGuardIdentityIsStableHiddenAndSystemManaged(t *testing.T) {
 	if _, _, authErr := service.Authenticate(ctx, raw); !errors.Is(authErr, ErrInvalidKey) {
 		t.Fatalf("system identity authenticated externally: %v", authErr)
 	}
+	if _, identityErr := service.AuthenticateIdentity(ctx, raw); !errors.Is(identityErr, ErrInvalidKey) {
+		t.Fatalf("system identity passed identity authentication: %v", identityErr)
+	}
 	if _, revealErr := service.RevealSecret(ctx, first.ID); !errors.Is(revealErr, ErrSystemManaged) {
 		t.Fatalf("reveal error = %v", revealErr)
 	}
@@ -152,6 +155,34 @@ func TestUnlimitedRuntimeLimitsBypassLimiterStores(t *testing.T) {
 		t.Fatalf("authenticated key = %d, want %d", value.ID, created.Key.ID)
 	}
 	release()
+}
+
+func TestAuthenticateIdentityBypassesInferenceLimiters(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "identity-auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repo := relational.NewClientKeyRepository(database)
+	service := NewService(repo, failingRateLimiter{}, failingConcurrencyLimiter{}, 60, 5, testCipher(t))
+	created, err := service.Create(ctx, CreateInput{
+		Name: "status polling", Enabled: true, RPMLimit: 1, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := service.AuthenticateIdentity(ctx, created.Secret)
+	if err != nil || value.ID != created.Key.ID {
+		t.Fatalf("identity authentication value=%#v err=%v", value, err)
+	}
+	if _, _, err := service.Authenticate(ctx, created.Secret); !errors.Is(err, ErrRuntimeUnavailable) {
+		t.Fatalf("inference authentication error = %v", err)
+	}
 }
 
 func TestAuthenticateDistinguishesRuntimeStoreFailures(t *testing.T) {

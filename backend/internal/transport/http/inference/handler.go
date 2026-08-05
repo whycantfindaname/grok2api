@@ -18,6 +18,7 @@ import (
 	clientkeyapp "github.com/chenyme/grok2api/backend/internal/application/clientkey"
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
 	modelapp "github.com/chenyme/grok2api/backend/internal/application/model"
+	"github.com/chenyme/grok2api/backend/internal/application/requeststatus"
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	clientkeydomain "github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	mediadomain "github.com/chenyme/grok2api/backend/internal/domain/media"
@@ -32,6 +33,7 @@ type Handler struct {
 	maxBodyBytes     int64
 	publicAPIBaseURL string
 	publicBaseURL    func() string
+	requestStatuses  *requeststatus.Registry
 }
 
 const (
@@ -79,6 +81,11 @@ func (h *Handler) SetPublicAPIBaseURLResolver(resolve func() string) *Handler {
 	return h
 }
 
+func (h *Handler) SetRequestStatusRegistry(registry *requeststatus.Registry) *Handler {
+	h.requestStatuses = registry
+	return h
+}
+
 func (h *Handler) Register(router *gin.RouterGroup) {
 	router.GET("/models", h.listModels)
 	router.POST("/responses", h.createResponse)
@@ -92,6 +99,39 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.POST("/responses/compact", h.compactResponse)
 	router.GET("/responses/:responseId", h.getResponse)
 	router.DELETE("/responses/:responseId", h.deleteResponse)
+}
+
+func (h *Handler) RegisterRequestStatus(router *gin.RouterGroup) {
+	router.GET("/request-status/:requestId", h.getRequestStatus)
+}
+
+type requestStatusResponse struct {
+	RequestID  string              `json:"request_id"`
+	State      requeststatus.State `json:"state"`
+	StartedAt  time.Time           `json:"started_at"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty"`
+	StatusCode int                 `json:"status_code,omitempty"`
+}
+
+func (h *Handler) getRequestStatus(c *gin.Context) {
+	clientKey, _, ok := requestIdentity(c)
+	if !ok {
+		return
+	}
+	requestID := strings.TrimSpace(c.Param("requestId"))
+	if h.requestStatuses == nil {
+		writeOpenAIError(c, http.StatusNotFound, "request_status_not_found", "请求状态不存在或已过期")
+		return
+	}
+	status, exists := h.requestStatuses.Get(clientKey.ID, requestID, time.Now())
+	if !exists {
+		writeOpenAIError(c, http.StatusNotFound, "request_status_not_found", "请求状态不存在或已过期")
+		return
+	}
+	c.JSON(http.StatusOK, requestStatusResponse{
+		RequestID: requestID, State: status.State, StartedAt: status.StartedAt,
+		FinishedAt: status.FinishedAt, StatusCode: status.StatusCode,
+	})
 }
 
 type responsesRequest struct {

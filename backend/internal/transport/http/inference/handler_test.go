@@ -15,10 +15,41 @@ import (
 
 	clientkeyapp "github.com/chenyme/grok2api/backend/internal/application/clientkey"
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
+	"github.com/chenyme/grok2api/backend/internal/application/requeststatus"
 	clientkeydomain "github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	mediadomain "github.com/chenyme/grok2api/backend/internal/domain/media"
+	"github.com/chenyme/grok2api/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+func TestRequestStatusIsScopedToAuthenticatedClientKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := requeststatus.NewRegistry(time.Minute)
+	registry.Start(7, "smart-search-request", time.Now().UTC())
+
+	newRouter := func(clientKeyID uint64) *gin.Engine {
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(middleware.ClientKey, clientkeydomain.Key{ID: clientKeyID})
+			c.Set(middleware.RequestIDKey, "status-query")
+			c.Next()
+		})
+		NewHandler(nil, nil, 1<<20).SetRequestStatusRegistry(registry).RegisterRequestStatus(router.Group("/v1"))
+		return router
+	}
+
+	ownedRecorder := httptest.NewRecorder()
+	newRouter(7).ServeHTTP(ownedRecorder, httptest.NewRequest(http.MethodGet, "/v1/request-status/smart-search-request", nil))
+	if ownedRecorder.Code != http.StatusOK || !strings.Contains(ownedRecorder.Body.String(), `"state":"running"`) {
+		t.Fatalf("owned status=%d body=%s", ownedRecorder.Code, ownedRecorder.Body.String())
+	}
+
+	foreignRecorder := httptest.NewRecorder()
+	newRouter(8).ServeHTTP(foreignRecorder, httptest.NewRequest(http.MethodGet, "/v1/request-status/smart-search-request", nil))
+	if foreignRecorder.Code != http.StatusNotFound || !strings.Contains(foreignRecorder.Body.String(), "request_status_not_found") {
+		t.Fatalf("foreign status=%d body=%s", foreignRecorder.Code, foreignRecorder.Body.String())
+	}
+}
 
 func TestVideoGenerationUsesOfficialXAIEndpointsAndFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)

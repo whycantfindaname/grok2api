@@ -17,6 +17,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
 	mediaapp "github.com/chenyme/grok2api/backend/internal/application/media"
 	modelapp "github.com/chenyme/grok2api/backend/internal/application/model"
+	"github.com/chenyme/grok2api/backend/internal/application/requeststatus"
 	settingsapp "github.com/chenyme/grok2api/backend/internal/application/settings"
 	updatecheckapp "github.com/chenyme/grok2api/backend/internal/application/updatecheck"
 	accounthttp "github.com/chenyme/grok2api/backend/internal/transport/http/account"
@@ -65,6 +66,7 @@ type Dependencies struct {
 	QualityGuardToken      string
 	QualityGuardProbe      egressapp.QualityProbeInput
 	Updates                *updatecheckapp.Service
+	RequestStatuses        *requeststatus.Registry
 }
 
 type ReadinessComponent struct {
@@ -103,6 +105,12 @@ type ReadinessSnapshot struct {
 	UpdatedAt  time.Time                     `json:"updatedAt"`
 	Components map[string]ReadinessComponent `json:"components,omitempty"`
 	Startup    *ReadinessStartupReport       `json:"startup,omitempty"`
+}
+
+const defaultRequestStatusRetention = 10 * time.Minute
+
+func newRequestStatusRegistry() *requeststatus.Registry {
+	return requeststatus.NewRegistry(defaultRequestStatusRetention)
 }
 
 // New 创建完整 HTTP 路由并明确区分公共、管理员和客户端鉴权边界。
@@ -162,12 +170,24 @@ func New(deps Dependencies) *gin.Engine {
 		return deps.PublicAPIBaseURL
 	}, deps.Updates).Register(adminProtected)
 
+	requestStatuses := deps.RequestStatuses
+	if requestStatuses == nil {
+		requestStatuses = newRequestStatusRegistry()
+	}
+	inferenceHandler := inference.NewHandler(deps.Gateway, deps.Models, deps.MaxBodyBytes, deps.PublicAPIBaseURL)
+	inferenceHandler.SetRequestStatusRegistry(requestStatuses)
+	if deps.Settings != nil {
+		inferenceHandler.SetPublicAPIBaseURLResolver(deps.Settings.PublicAPIBaseURL)
+	}
 	if deps.QualityGuardToken != "" {
 		qualityGuardInternal := router.Group("/api/internal/v1/quality-guard")
 		qualityGuardInternal.Use(middleware.QualityGuardAuth(deps.QualityGuardToken))
 		audithttp.NewQualityGuardHandler(deps.Audits, deps.QualityGuardProbe.ClientKeyID).RegisterQualityGuard(qualityGuardInternal)
 		egressHandler.RegisterQualityGuard(qualityGuardInternal)
 	}
+	statusV1 := router.Group("/v1")
+	statusV1.Use(middleware.ClientIdentityAuth(deps.ClientKeys))
+	inferenceHandler.RegisterRequestStatus(statusV1)
 
 	v1 := router.Group("/v1")
 	v1.Use(deps.ConcurrencyGate.Middleware())
@@ -184,10 +204,7 @@ func New(deps Dependencies) *gin.Engine {
 		})
 	}
 	v1.Use(middleware.ClientAuth(deps.ClientKeys))
-	inferenceHandler := inference.NewHandler(deps.Gateway, deps.Models, deps.MaxBodyBytes, deps.PublicAPIBaseURL)
-	if deps.Settings != nil {
-		inferenceHandler.SetPublicAPIBaseURLResolver(deps.Settings.PublicAPIBaseURL)
-	}
+	v1.Use(middleware.TrackRequestStatus(requestStatuses))
 	inferenceHandler.Register(v1)
 	registerFrontend(router, deps.FrontendStaticPath)
 	return router

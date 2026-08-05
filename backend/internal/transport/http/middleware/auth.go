@@ -70,6 +70,23 @@ func ClientAuth(service *clientkeyapp.Service) gin.HandlerFunc {
 	}
 }
 
+// ClientIdentityAuth validates a client API key without consuming inference quotas.
+func ClientIdentityAuth(service *clientkeyapp.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok {
+			raw = strings.TrimSpace(c.GetHeader("X-API-Key"))
+		}
+		value, err := service.AuthenticateIdentity(c.Request.Context(), raw)
+		if err != nil {
+			writeOpenAIError(c, clientErrorStatus(err), clientErrorCode(err), clientErrorMessage(err))
+			return
+		}
+		c.Set(ClientKey, value)
+		c.Next()
+	}
+}
+
 func bearerToken(header string) (string, bool) {
 	parts := strings.Fields(header)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {

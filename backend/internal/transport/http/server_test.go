@@ -19,6 +19,19 @@ func testDependencies() Dependencies {
 	return Dependencies{RequestTimeout: time.Second, MaxBodyBytes: 1024, ConcurrencyGate: middleware.NewConcurrencyGate(1024)}
 }
 
+func TestDefaultRequestStatusRetentionCoversMaximumClientPollInterval(t *testing.T) {
+	registry := newRequestStatusRegistry()
+	startedAt := time.Now().UTC()
+	registry.Start(1, "slow-poll", startedAt)
+	finishedAt := startedAt.Add(time.Second)
+	registry.Finish(1, "slow-poll", http.StatusOK, finishedAt)
+
+	status, ok := registry.Get(1, "slow-poll", finishedAt.Add(5*time.Minute))
+	if !ok || status.State != "completed" {
+		t.Fatalf("status after maximum client poll interval = %#v, ok=%v", status, ok)
+	}
+}
+
 func TestReadinessEndpointReturnsStructuredDegradedStateAsReady(t *testing.T) {
 	deps := testDependencies()
 	deps.Readiness = func(context.Context) ReadinessSnapshot {
