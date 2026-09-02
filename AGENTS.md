@@ -20,8 +20,14 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 <!-- TRELLIS:END -->
 
-## Managed repository workflow
+## Managed Repository Context
 
+- Registry ID: `grok2api` (Agent Infra companion manifest `manifests/companion-repositories.json`)
+- Managed branch: `lwj_dev` (upstream mirror baseline: `main`)
+- Repository convergence authority: Agent Infra registry and sync contract (fetch, classify, safe fast-forward)
+- Owner workflow + product/runtime authority: this repository's own source, `README.md` and `STRUCTURE.md`
 - Delivery status: `delivery_pending`; runtime delivery is platform-owned and the old source-test contract is retired.
-- Read order: `AGENTS.md` -> project documentation.
+- Read order: `AGENTS.md` -> `README.md` (quick start / gateway setup) -> `STRUCTURE.md` (structure, ownership and maintenance boundaries)
+- Update triggers: managed branch or remote change; build/release chain change; platform activation change; service/config/secret ownership change; new stable error class; a completed reusable major update flow
 - No project-local delivery contract is active. Add a v2 contract only after shared delivery ownership is modeled and the Agent Infra registry is changed to `delivery_contract`.
+- Do not invent workflow: follow only the docs above; do not guess build, service restart, or activation steps.

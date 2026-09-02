@@ -13,7 +13,7 @@
 1. **身份与边界**：第 1 节说明 Infra 中的 component、source checkout、consumer、个人 fork 和 upstream 关系。
 2. **目录与接口**：第 2–4 节依次说明 tracked 顶层结构、Backend、Frontend 以及它们的公开边界。
 3. **构建与运行**：第 5–6 节说明 Docker/Compose、可选运维工具、source/build/runtime/live 与凭据边界。
-4. **当前 fork 与验证**：第 7–8 节说明 `fork/main` 的个人改动、开发命令、契约检查和跨 fork 同步入口。
+4. **当前 fork 与验证**：第 7–8 节说明 `origin/main` 之外的分支改动、开发命令、契约检查和跨 fork 同步入口。
 5. **维护规则**：第 9 节说明哪些源码、配置或 Infra manifest 变化需要回写本文或其他文档。
 
 本文统一使用以下术语：`source` 指 Git 中维护的源码与契约；`build` 指构建、生成或 CI 检查过程；`runtime` 指部署或本机运行时产生的配置、数据、状态和服务；`live` 指在真实进程或 consumer 上完成的运行态验证。`Infra consumer` 表示 manifest 登记的下游使用方，不表示该使用方已经完成配置、激活或请求验证。
@@ -188,12 +188,13 @@ entrypoint 的边界是：从只读挂载的 `/run/grok2api/config.yaml` 复制�
 
 ## 7. 当前 fork 的个人改动边界
 
-当前分支相对 `fork/main` 的可见差异由 `git diff fork/main...lwj_dev` 核对，可归纳为两类：
+当前分支相对已 fetch 的 `origin/main` 的可见差异由 `git diff origin/main...lwj_dev` 核对，可归纳为三类：
 
-1. **Web 搜索/引用和协议适配**：集中在 `backend/internal/infra/provider/web/{chat.go,gateway.go,responses_stream.go,image.go}`、`backend/internal/infra/provider/conversation/response.go` 及对应测试，处理 Gateway 的 `render_citation`、`tool_usage_card`/`tool_result`、Hosted Search call、URL citation、Chat/Responses SSE 形状和 xAI 工具使用信息。
-2. **客户端请求状态跟踪**：新增/修改 `backend/internal/application/requeststatus`、`clientkey/service.go`、`backend/internal/transport/http/{inference/handler.go,middleware/auth.go,middleware/request_status.go,server.go}` 及测试，以客户端身份隔离短期 request status 查询，并保留系统质量守护 Client Key 不可人工操作的边界。
+1. **客户端请求状态跟踪**：新增/修改 `backend/internal/application/requeststatus`、`clientkey/service.go`、`backend/internal/transport/http/{inference/handler.go,middleware/auth.go,middleware/request_status.go,server.go}` 及测试，以客户端身份隔离短期 request status 查询，并保留系统质量守护 Client Key 不可人工操作的边界。
+2. **Agent 工作流元数据**：`.trellis/`、`.agents/`、`.codex/`、`.claude/` 和 `.zcode/` 保存本分支的 Trellis 规范、hooks、skills 与平台入口；它们不改变 grok2api 的运行时 API。
+3. **本地维护兼容**：Build HTTP/2 测试同时识别旧的 `TLSNextProto["h2"]` 和 Go 1.24 起公开的 `Transport.Protocols.HTTP2()` 安装形态，避免把 Go 1.27 的标准库表示变化误判为未启用 HTTP/2。
 
-此外 `VERSION` 在该分支提升到 v3.1.2。上述是当前分支与个人 fork 基线的差异摘要，不声称 fork/main 之前的所有提交都由本地个人编写；合并提交带入的 upstream 内容仍按 upstream 代码维护。新增 fork-specific 逻辑应优先放在对应 Provider/transport 边界，配套测试，并在本节和相关运行文档中留下可核对的文件范围。
+`VERSION` 跟随 upstream，不作为 fork-specific 适配。上述摘要只描述 `origin/main` 之外的分支差异；合并提交带入的 upstream 内容仍按 upstream 代码维护。新增 fork-specific 逻辑应优先放在对应 Provider/transport 边界，配套测试，并在本节和相关运行文档中留下可核对的文件范围。
 
 ## 8. 开发、验证与 upstream 同步入口
 
