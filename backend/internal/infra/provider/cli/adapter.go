@@ -254,8 +254,21 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	primaryBase := a.primaryBaseURL()
 	base := a.inferenceBaseForOperation(request.Credential, request.Billing, request.Method, request.Path)
 	conversationScope := a.conversationReasoningScope(request, base)
+	// Keep a second, cache-free conversation conversion for an eventual XAI
+	// fallback. The normal conversion below intentionally restores reasoning
+	// from the selected plane for the primary request; using that enriched body
+	// as the fallback seed would leak Build-only encrypted proofs into XAI.
+	var replayBaseBody []byte
+	conversationOperation := request.Operation == conversation.OperationChat || request.Operation == conversation.OperationMessages
+	conversationReplayEnabled := request.NormalizeBody && request.Method == http.MethodPost && conversationOperation && a.conversationReasoningCache != nil && strings.TrimSpace(conversationScope) != ""
+	if conversationReplayEnabled {
+		replayBaseBody, _, err = conversation.ConvertRequestWithReasoningReplay(request.Body, request.Model, request.Operation, nil, "")
+		if err != nil {
+			return invalidConversationResponse(request.Operation, err), nil
+		}
+	}
 	if request.NormalizeBody {
-		if request.Operation == conversation.OperationChat || request.Operation == conversation.OperationMessages {
+		if conversationOperation {
 			body, conversationOptions, err = conversation.ConvertRequestWithReasoningReplay(body, request.Model, request.Operation, a.conversationReasoningCache, conversationScope)
 			if err == nil && conversationOptions.ReasoningEffortSet && request.NormalizedMetadata != nil {
 				request.NormalizedMetadata.ReasoningEffort = conversationOptions.ReasoningEffort
@@ -286,6 +299,12 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				return invalidConversationResponse(request.Operation, err), nil
 			}
 			return invalidResponsesResponse(err), nil
+		}
+		if replayBaseBody != nil {
+			replayBaseBody, err = normalizeBuildRequestWithMetadata(replayBaseBody, request.Model, request.Operation, nil)
+			if err != nil {
+				return invalidConversationResponse(request.Operation, err), nil
+			}
 		}
 	}
 	if request.Operation == conversation.OperationMessages && conversationOptions.AnthropicWebSearch {
@@ -318,6 +337,18 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				}
 				return invalidResponsesResponse(err), nil
 			}
+			if replayBaseBody != nil {
+				replayBaseBody, _, err = prepareBuildPromptCacheRoute(replayBaseBody, request.Operation, request.Model, request.PromptCacheKey, allowClientTools)
+				if err != nil {
+					err = fmt.Errorf("准备 Build prompt cache 回退路由: %w", err)
+					return invalidConversationResponse(request.Operation, err), nil
+				}
+				replayBaseBody, err = injectPromptCacheKey(replayBaseBody, request.PromptCacheKey)
+				if err != nil {
+					err = fmt.Errorf("写入回退 prompt_cache_key: %w", err)
+					return invalidConversationResponse(request.Operation, err), nil
+				}
+			}
 		}
 	}
 	if compactionRequested {
@@ -332,8 +363,10 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	// native Responses replay remains account-scoped, while the Chat/Messages
 	// bridge is scoped to the client session, model, and physical plane only;
 	// encrypted reasoning is portable across accounts on that plane.
-	replayBaseBody := body
-	body, replayKey := a.applyReasoningReplay(ctx, request, replayBaseBody, base)
+	if replayBaseBody == nil {
+		replayBaseBody = body
+	}
+	body, replayKey := a.applyReasoningReplay(ctx, request, body, base)
 	call := a.doResponseRequest(ctx, request, accessToken, body, base)
 	if call.err != nil {
 		return nil, call.err
