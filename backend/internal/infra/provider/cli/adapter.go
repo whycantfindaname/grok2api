@@ -396,7 +396,37 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		} else {
 			fallbackBase := a.fallbackBaseURL()
 			if fallbackBase != "" && !strings.EqualFold(fallbackBase, base) {
-				fallbackBody, fallbackReplayKey := a.applyReasoningReplay(ctx, request, replayBaseBody, fallbackBase)
+				// Rebuild a conversation fallback from the original client history using
+				// the XAI conversation scope. The primary request intentionally uses a
+				// Build-scoped conversion, while replayBaseBody is cache-free so that
+				// Build-only encrypted reasoning never crosses the plane. Reusing that
+				// cache-free seed here would also drop reasoning captured by the first
+				// XAI fallback, so restore the XAI-scoped conversation cache before the
+				// fallback request is sent.
+				fallbackBody := replayBaseBody
+				fallbackConversationScope := a.conversationReasoningScope(request, fallbackBase)
+				if conversationReplayEnabled && strings.TrimSpace(fallbackConversationScope) != "" {
+					fallbackBody, _, err = conversation.ConvertRequestWithReasoningReplay(request.Body, request.Model, request.Operation, a.conversationReasoningCache, fallbackConversationScope)
+					if err != nil {
+						return invalidConversationResponse(request.Operation, err), nil
+					}
+					fallbackBody, err = normalizeBuildRequestWithMetadata(fallbackBody, request.Model, request.Operation, nil)
+					if err != nil {
+						return invalidConversationResponse(request.Operation, err), nil
+					}
+					allowClientTools := request.AllowClientToolCacheRoute || (account.RoutingCandidate{Credential: request.Credential, Billing: request.Billing}).IsKnownFreeBuild()
+					fallbackBody, _, err = prepareBuildPromptCacheRoute(fallbackBody, request.Operation, request.Model, request.PromptCacheKey, allowClientTools)
+					if err != nil {
+						err = fmt.Errorf("准备 Build prompt cache 回退路由: %w", err)
+						return invalidConversationResponse(request.Operation, err), nil
+					}
+					fallbackBody, err = injectPromptCacheKey(fallbackBody, request.PromptCacheKey)
+					if err != nil {
+						err = fmt.Errorf("写入回退 prompt_cache_key: %w", err)
+						return invalidConversationResponse(request.Operation, err), nil
+					}
+				}
+				fallbackBody, fallbackReplayKey := a.applyReasoningReplay(ctx, request, fallbackBody, fallbackBase)
 				fallbackCtx := infraegress.WithPhysicalCallStage(ctx, "plane_fallback")
 				fallbackCall := a.doResponseRequest(fallbackCtx, request, accessToken, fallbackBody, fallbackBase)
 				fallbackErr := fallbackCall.err
