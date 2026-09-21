@@ -50,3 +50,4 @@ __pycache__/
 /.tmp/
 /tmp/
 /Dockerfile.local
+.trellis/tasks/09-14-trellis-beta4-harness-upgrade/
