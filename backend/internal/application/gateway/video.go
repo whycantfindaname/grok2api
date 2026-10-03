@@ -1025,10 +1025,6 @@ func (s *Service) recordVideoAudit(ctx context.Context, job media.Job, durationM
 	return s.mediaJobs.MarkMediaJobUsageRecorded(markCtx, job.ID, time.Now().UTC())
 }
 
-func encodeVideoInput(imageURL string, referenceURLs []string) (string, error) {
-	return encodeVideoInputFull(provider.VideoOperationGenerate, imageURL, referenceURLs, nil, "")
-}
-
 func encodeVideoInputFull(operation provider.VideoOperation, imageURL string, referenceURLs []string, referenceAudios []string, videoURL string) (string, error) {
 	payload := map[string]any{}
 	if operation == "" {

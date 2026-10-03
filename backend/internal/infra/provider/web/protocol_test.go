@@ -1193,7 +1193,7 @@ func TestOnlyChatModelsExposeRateLimitModes(t *testing.T) {
 			}
 			continue
 		}
-		if isImagineQuotaMode(spec.Mode) {
+		if account.IsWebImagineQuotaMode(spec.Mode) {
 			continue
 		}
 		if spec.Mode != "" {

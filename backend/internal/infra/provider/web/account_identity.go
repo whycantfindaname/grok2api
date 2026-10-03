@@ -18,8 +18,4 @@ func (a *Adapter) SyncAccountIdentity(ctx context.Context, credential account.Cr
 	return sessionidentity.Fetch(ctx, a.config().BaseURL, credential, a.egress, a.cipher)
 }
 
-func parseAccountIdentity(body []byte) (provider.AccountIdentity, error) {
-	return sessionidentity.Parse(body)
-}
-
 var _ provider.AccountIdentityAdapter = (*Adapter)(nil)

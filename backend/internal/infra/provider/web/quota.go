@@ -149,10 +149,6 @@ type imagineQuotaProduct struct {
 	NextAvailableAt   *time.Time `json:"nextAvailableAt"`
 }
 
-func isImagineQuotaMode(mode string) bool {
-	return account.IsWebImagineQuotaMode(mode)
-}
-
 func decodeImagineQuotaSnapshot(body []byte, accountID uint64, now time.Time) ([]account.QuotaWindow, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {

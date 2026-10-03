@@ -149,7 +149,7 @@ func TestNormalizeRequestDropsToolChoiceWhenToolsEmpty(t *testing.T) {
 		"empty tools":   `{"model":"public","input":"hello","tools":[],"tool_choice":"required"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			normalized, err := normalizeRequest([]byte(body), spec)
+			normalized, err := normalizeRequestWithMetadata([]byte(body), spec, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -344,12 +344,12 @@ func TestNormalizeRequestAppliesConsoleContract(t *testing.T) {
 	if !ok {
 		t.Fatal("grok-4.3 missing")
 	}
-	body, err := normalizeRequest([]byte(`{
+	body, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.3",
 		"metadata":{"private":"value"},
 		"reasoning":{"effort":"xhigh"},
 		"tools":[{"type":"web_search","custom":true},{"type":"function","name":"lookup","parameters":{"type":"object"}}]
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,14 +372,18 @@ func TestNormalizeRequestAppliesConsoleContract(t *testing.T) {
 		t.Fatalf("include = %#v", include)
 	}
 	tools, _ := payload["tools"].([]any)
-	if len(tools) != 2 || toolIdentity(tools[0]) != "web_search" || toolIdentity(tools[1]) != "function:lookup" {
+	if len(tools) != 2 {
 		t.Fatalf("tools = %#v", tools)
 	}
 	webSearch, _ := tools[0].(map[string]any)
-	if webSearch["custom"] != nil || webSearch["enable_image_understanding"] != true {
+	if webSearch["type"] != "web_search" || webSearch["custom"] != nil || webSearch["enable_image_understanding"] != true {
 		t.Fatalf("web_search = %#v", webSearch)
 	}
-	stateless, err := normalizeRequest([]byte(`{"model":"grok-4.3","store":true,"previous_response_id":"resp_1","service_tier":"priority","prompt_cache_key":"cache_1","input":"hello"}`), spec)
+	function, _ := tools[1].(map[string]any)
+	if function["type"] != "function" || function["name"] != "lookup" {
+		t.Fatalf("function = %#v", function)
+	}
+	stateless, err := normalizeRequestWithMetadata([]byte(`{"model":"grok-4.3","store":true,"previous_response_id":"resp_1","service_tier":"priority","prompt_cache_key":"cache_1","input":"hello"}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +398,7 @@ func TestNormalizeRequestLiftsFunctionParameterUnion(t *testing.T) {
 	if !ok {
 		t.Fatal("grok-4.3 missing")
 	}
-	body, err := normalizeRequest([]byte(`{
+	body, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.3",
 		"input":"hello",
 		"tools":[{"type":"function","name":"automation_update","parameters":{
@@ -406,7 +410,7 @@ func TestNormalizeRequestLiftsFunctionParameterUnion(t *testing.T) {
 			"properties":{},
 			"oneOf":[{"$ref":"#/$defs/View"},{"$ref":"#/$defs/Create"}]
 		}}]
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,11 +436,11 @@ func TestNormalizeRequestIllegalFunctionRootNamesTool(t *testing.T) {
 	if !ok {
 		t.Fatal("grok-4.3 missing")
 	}
-	_, err := normalizeRequest([]byte(`{
+	_, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.3",
 		"input":"hello",
 		"tools":[{"type":"function","name":"automation_update","parameters":{"type":"string"}}]
-	}`), spec)
+	}`), spec, nil)
 	if err == nil || !strings.Contains(err.Error(), "automation_update") {
 		t.Fatalf("error=%v", err)
 	}
@@ -449,10 +453,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	}
 
 	t.Run("forwards enable_image_search on web_search", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"web_search","enable_image_search":true,"custom":true}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -477,10 +481,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	})
 
 	t.Run("omits enable_image_search when client does not set it", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"web_search"}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -495,10 +499,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	})
 
 	t.Run("forwards valid x_search from_date and to_date", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"x_search","from_date":"2026-07-01","to_date":"2026-07-23","noise":1}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -519,10 +523,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	})
 
 	t.Run("drops invalid date formats", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"x_search","from_date":"2026-7-01","to_date":"2026-02-30"}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -540,10 +544,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	})
 
 	t.Run("drops inverted date range", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"x_search","from_date":"2026-07-24","to_date":"2026-07-23"}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -558,10 +562,10 @@ func TestNormalizeRequestForwardsXSearchTimeRangeAndImageSearch(t *testing.T) {
 	})
 
 	t.Run("keeps only from_date when to_date absent", func(t *testing.T) {
-		body, err := normalizeRequest([]byte(`{
+		body, err := normalizeRequestWithMetadata([]byte(`{
 			"model":"grok-4.3",
 			"tools":[{"type":"x_search","from_date":"2026-08-01"}]
-		}`), spec)
+		}`), spec, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -618,7 +622,7 @@ func TestNormalizeRequestAvoidsClientViewImageToolCollision(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			body, err = normalizeRequest(body, spec)
+			body, err = normalizeRequestWithMetadata(body, spec, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -631,7 +635,7 @@ func TestNormalizeRequestAvoidsClientViewImageToolCollision(t *testing.T) {
 				t.Fatalf("tools = %#v", tools)
 			}
 			function, _ := tools[0].(map[string]any)
-			if toolIdentity(function) != "function:view_image" || function["parameters"] == nil {
+			if function["type"] != "function" || function["name"] != "view_image" || function["parameters"] == nil {
 				t.Fatalf("client view_image must be retained: %#v", function)
 			}
 			webSearch, _ := tools[1].(map[string]any)
@@ -648,7 +652,7 @@ func TestNormalizeRequestAvoidsClientViewImageToolCollision(t *testing.T) {
 func TestNormalizeRequestDoesNotInjectToolsForConsoleCatalog(t *testing.T) {
 	for _, spec := range catalog {
 		t.Run(spec.PublicID, func(t *testing.T) {
-			body, err := normalizeRequest([]byte(`{"model":"public","input":"hello","tool_choice":"required"}`), spec)
+			body, err := normalizeRequestWithMetadata([]byte(`{"model":"public","input":"hello","tool_choice":"required"}`), spec, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -668,11 +672,11 @@ func TestNormalizeRequestPreservesMultiAgentDefaultsWithoutInjectingTools(t *tes
 	if !ok {
 		t.Fatal("grok-4.20-multi-agent-0309 missing")
 	}
-	body, err := normalizeRequest([]byte(`{
+	body, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.20-multi-agent-0309",
 		"input":[{"role":"system","content":"hello"},{"role":"user","content":[{"type":"input_text","text":"news"}]}],
 		"stream":true
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,7 +738,7 @@ func TestNormalizeRequestAppliesConsoleCompatibilityBoundary(t *testing.T) {
 	if !ok {
 		t.Fatal("grok-4.20-0309-non-reasoning missing")
 	}
-	body, err := normalizeRequest([]byte(`{
+	body, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"public",
 		"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}},
 		"input":[
@@ -749,7 +753,7 @@ func TestNormalizeRequestAppliesConsoleCompatibilityBoundary(t *testing.T) {
 			{"type":"web_search","external_web_access":true}
 		],
 		"tool_choice":"required"
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -779,10 +783,14 @@ func TestNormalizeRequestAppliesConsoleCompatibilityBoundary(t *testing.T) {
 		t.Fatalf("message parts = %#v", parts)
 	}
 	tools, _ := payload["tools"].([]any)
-	if len(tools) != 1 || toolIdentity(tools[0]) != "web_search" {
+	if len(tools) != 1 {
 		t.Fatalf("sanitized tools = %#v", tools)
 	}
-	if tools[0].(map[string]any)["external_web_access"] != nil {
+	webSearch, _ := tools[0].(map[string]any)
+	if webSearch["type"] != "web_search" {
+		t.Fatalf("sanitized web_search = %#v", webSearch)
+	}
+	if webSearch["external_web_access"] != nil {
 		t.Fatalf("unsupported web search controls leaked: %#v", tools[0])
 	}
 }
@@ -827,11 +835,11 @@ func TestNormalizeRequestStripsUnsupportedGrok420ReasoningEffort(t *testing.T) {
 		t.Fatalf("metadata effort = %q, want fixed", metadata.ReasoningEffort)
 	}
 
-	effortOnly, err := normalizeRequest([]byte(`{
+	effortOnly, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.20-0309-reasoning",
 		"input":"hello",
 		"reasoning":{"effort":"none"}
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,10 +848,10 @@ func TestNormalizeRequestStripsUnsupportedGrok420ReasoningEffort(t *testing.T) {
 		t.Fatalf("effort-only reasoning must be removed: %#v", payload)
 	}
 
-	withoutEffort, err := normalizeRequest([]byte(`{
+	withoutEffort, err := normalizeRequestWithMetadata([]byte(`{
 		"model":"grok-4.20-0309-reasoning",
 		"input":"hello"
-	}`), spec)
+	}`), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -883,7 +891,7 @@ func TestGrok420FixedReasoningStripsEffortAfterProtocolConversion(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			normalized, err := normalizeRequest(converted, spec)
+			normalized, err := normalizeRequestWithMetadata(converted, spec, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

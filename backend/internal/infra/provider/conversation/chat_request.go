@@ -110,10 +110,6 @@ type chatMessage struct {
 	Name       string          `json:"name"`
 }
 
-func convertChatMessages(messages []chatMessage) ([]any, error) {
-	return convertChatMessagesWithReasoningReplay(messages, nil, "")
-}
-
 func convertChatMessagesWithReasoningReplay(messages []chatMessage, cache *ReasoningCache, scope string) ([]any, error) {
 	input := make([]any, 0, len(messages))
 	for _, message := range messages {

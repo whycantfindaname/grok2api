@@ -287,20 +287,20 @@ func TestEncodeVideoInputEnforcesPersistedLimit(t *testing.T) {
 	overhead := len(base)
 	urlLen := (media.MaxInputJSONBytes - overhead) / 2
 	atLimit := strings.Repeat("A", urlLen)
-	encoded, err := encodeVideoInput(atLimit, nil)
+	encoded, err := encodeVideoInputFull(provider.VideoOperationGenerate, atLimit, nil, nil, "")
 	if err != nil {
 		t.Fatalf("encode at limit: %v", err)
 	}
 	if len(encoded) > media.MaxInputJSONBytes {
 		t.Fatalf("encoded len=%d exceeds limit", len(encoded))
 	}
-	if _, err := encodeVideoInput(atLimit+"AA", nil); !errors.Is(err, ErrVideoInputTooLarge) {
+	if _, err := encodeVideoInputFull(provider.VideoOperationGenerate, atLimit+"AA", nil, nil, ""); !errors.Is(err, ErrVideoInputTooLarge) {
 		t.Fatalf("oversized input error = %v", err)
 	}
 }
 
 func TestEncodeDecodeVideoInputPreservesImageAndReferences(t *testing.T) {
-	encoded, err := encodeVideoInput("https://example.com/first.png", []string{"https://example.com/ref.png"})
+	encoded, err := encodeVideoInputFull(provider.VideoOperationGenerate, "https://example.com/first.png", []string{"https://example.com/ref.png"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestEncodeDecodeVideoInputPreservesImageAndReferences(t *testing.T) {
 		t.Fatalf("decoded split = %q %#v from %s", imageURL, refs, encoded)
 	}
 
-	encoded, err = encodeVideoInput("", []string{"https://example.com/ref-only.png"})
+	encoded, err = encodeVideoInputFull(provider.VideoOperationGenerate, "", []string{"https://example.com/ref-only.png"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

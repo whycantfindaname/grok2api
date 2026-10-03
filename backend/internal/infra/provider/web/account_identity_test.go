@@ -10,6 +10,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	domainegress "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/sessionidentity"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
@@ -57,14 +58,14 @@ func TestSyncAccountIdentityUsesWebBrowserIdentity(t *testing.T) {
 
 func TestParseAccountIdentityRejectsMissingIdentity(t *testing.T) {
 	t.Parallel()
-	if _, err := parseAccountIdentity([]byte(`{"user":{"name":"anonymous"}}`)); err == nil {
+	if _, err := sessionidentity.Parse([]byte(`{"user":{"name":"anonymous"}}`)); err == nil {
 		t.Fatal("expected missing identity error")
 	}
 }
 
 func TestParseAccountIdentityAcceptsAuthenticatedSessionEnvelope(t *testing.T) {
 	t.Parallel()
-	identity, err := parseAccountIdentity([]byte(`{"status":"authenticated","session":{"userId":"user-1","email":"user@example.com","organizationId":"org-1"}}`))
+	identity, err := sessionidentity.Parse([]byte(`{"status":"authenticated","session":{"userId":"user-1","email":"user@example.com","organizationId":"org-1"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

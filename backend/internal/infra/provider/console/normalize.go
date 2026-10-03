@@ -18,10 +18,6 @@ var (
 	resetDurationPattern = regexp.MustCompile(`(?i)(\d+)\s*([dhms])`)
 )
 
-func normalizeRequest(body []byte, spec ModelSpec) ([]byte, error) {
-	return normalizeRequestWithMetadata(body, spec, nil)
-}
-
 func normalizeRequestWithMetadata(body []byte, spec ModelSpec, metadata *provider.NormalizedRequestMetadata) ([]byte, error) {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -423,19 +419,6 @@ func normalizeConsoleToolChoice(payload map[string]any, retainedClientTools bool
 		return
 	}
 	payload["tool_choice"] = map[string]any{"type": "function", "name": strings.TrimSpace(name)}
-}
-
-func toolIdentity(value any) string {
-	tool, ok := value.(map[string]any)
-	if !ok {
-		return ""
-	}
-	typeName, _ := tool["type"].(string)
-	if typeName != "function" {
-		return typeName
-	}
-	name, _ := tool["name"].(string)
-	return typeName + ":" + name
 }
 
 func consoleRetryAfter(body []byte) time.Duration {
